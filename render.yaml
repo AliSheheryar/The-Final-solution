@@ -1,0 +1,8 @@
+services:
+  - type: web
+    name: forge-dashboard
+    runtime: docker
+    plan: free
+    repo: https://github.com/AliSheheryar/The-Final-solution
+    branch: master
+    healthCheckPath: /
