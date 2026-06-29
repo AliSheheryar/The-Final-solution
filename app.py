@@ -511,10 +511,42 @@ if page == "◆ Command Overview":
         alerts.append(("good", f"Email driving {f0(email_ch['rev'])} at 45x ROAS",
             "Your cheapest, highest-margin channel is compounding. Protect and scale it.", ""))
 
-        for lv, t, d, fix in alerts:
-            st.markdown(f"""<div class="alert {lv}"><div class="dot"></div><div>
-                <div class="t">{t}</div><div class="d">{d}</div>
-                {'<div class="fix">' + fix + '</div>' if fix else ''}</div></div>""", unsafe_allow_html=True)
+        alert_details = {
+            0: {"impact": f"TikTok spent {f0(tt['spend'])} and earned {f0(tt['rev'])}. At {ttM*100:.0f}% product margin, that's only {f0(tt['rev']*ttM)} gross profit — barely covering the ad spend.",
+                "breakdown": [("TikTok spend", f0(tt['spend'])), ("TikTok revenue", f0(tt['rev'])), ("Gross profit from TikTok", f0(tt['rev']*ttM)), ("Net after ad cost", f"{'+'if ttProfit>=0 else '−'}{f0(abs(ttProfit))}"), ("Break-even ROAS needed", f"{ttBE:.2f}x"), ("Actual ROAS", f"{tr:.2f}x")],
+                "actions": ["Pause ad sets with ROAS below 1.5x", "Test 3 new UGC-style creatives", "Shift 50% of TikTok budget to Google (3.4% CVR vs 1.4%)", "Set a 14-day review window before scaling back up"]},
+            1: {"impact": f"Your LTV of {f1(D['ltv'])} divided by CAC of {f1(D['blendedCAC'])} gives {ltvCac:.1f}x. The danger zone starts below 2.0x.",
+                "breakdown": [("Customer LTV", f1(D['ltv'])), ("Blended CAC", f1(D['blendedCAC'])), ("LTV:CAC ratio", f"{ltvCac:.1f}x"), ("Repeat rate", f"{D['repeatRate']}%"), ("Avg orders/lifetime", f"{D['avgOrdersLifetime']:.1f}")],
+                "actions": ["Add a post-purchase upsell flow (target: +£12 AOV)", "Launch a win-back email to the 16% at-risk segment", "Test bundle offers to lift repeat rate from 28% → 32%"]},
+            2: {"impact": f"{worst_staff['name']} packed {worst_staff['packed']} orders with a {worst_staff['errors']}% error rate. That's ~{round(worst_staff['packed']*worst_staff['errors']/100)} mis-sends at ~£29 each = {f0(round(worst_staff['packed']*worst_staff['errors']/100*29))} in re-ship costs.",
+                "breakdown": [("Orders packed", f"{worst_staff['packed']}"), ("Error rate", f"{worst_staff['errors']}%"), ("Estimated mis-sends", f"{round(worst_staff['packed']*worst_staff['errors']/100)}"), ("Cost per mis-send", "~£29"), ("Monthly cost of errors", f"~{f0(round(worst_staff['packed']*worst_staff['errors']/100*29))}")],
+                "actions": ["Implement scan-to-pack barcode verification", "Pair with Liam H. (0.6% error rate) for buddy training", "Set a 2-week target: reduce to <2% or reassign"]},
+            3: {"impact": f"£{D['deadStockValue']:,} is locked in {len(D['dead'])} SKUs that aren't selling. That's cash that could buy best-sellers or fund ads.",
+                "breakdown": [(d["sku"], f"{f0(d['value'])} · {d['units']} units · {d['age']}d old") for d in D["dead"]],
+                "actions": [f"{d['sku']}: {d['plan']}" for d in D["dead"]]},
+            4: {"impact": f"Email generated {f0(email_ch['rev'])} from just {f0(email_ch['spend'])} platform cost. That's a {email_ch['rev']/email_ch['spend']:.0f}x return — your most efficient channel by far.",
+                "breakdown": [(e["name"], f"{f0(e['rev'])} ({e['type']})") for e in D["email"]],
+                "actions": ["Increase send frequency on the welcome flow", "A/B test subject lines on campaigns", "Add a VIP early-access flow for Champions segment"]},
+        }
+
+        for idx, (lv, t, d, fix) in enumerate(alerts):
+            icon = {"crit": "🔴", "warn": "🟡", "good": "🟢"}.get(lv, "⚪")
+            with st.expander(f"{icon} {t}", expanded=False):
+                st.markdown(f"**Summary:** {d}")
+                if fix:
+                    st.markdown(f"**Quick fix:** {fix}")
+                det = alert_details.get(idx, {})
+                if det.get("impact"):
+                    st.markdown(f"**Full impact analysis:**")
+                    st.info(det["impact"])
+                if det.get("breakdown"):
+                    st.markdown("**Detailed breakdown:**")
+                    bk_df = pd.DataFrame(det["breakdown"], columns=["Metric", "Value"])
+                    st.dataframe(bk_df, hide_index=True, use_container_width=True)
+                if det.get("actions"):
+                    st.markdown("**Action plan:**")
+                    for ai, action in enumerate(det["actions"], 1):
+                        st.markdown(f"{ai}. {action}")
 
     st.markdown("#### Revenue engine")
     c1, c2 = st.columns([1.6, 1])
@@ -535,6 +567,44 @@ if page == "◆ Command Overview":
             "Share": f"{c['rev']/D['grossRevenue']*100:.0f}%"
         } for c in D["channels"]])
         st.dataframe(df, hide_index=True, use_container_width=True)
+
+    st.markdown("#### Channel deep-dive")
+    selected_ch = st.selectbox("Select a channel to explore", [c["name"] for c in D["channels"]], key="overview_channel")
+    ch = next(c for c in D["channels"] if c["name"] == selected_ch)
+    ch_roas = ch["rev"] / ch["spend"] if ch["spend"] else float("inf")
+    ch_cac = ch["spend"] / ch["newCust"] if ch["spend"] and ch["newCust"] else 0
+    ch_aov = ch["rev"] / ch["orders"]
+    ch_margin = D["breakeven"]["platformMargin"].get(ch["name"], grossMarginPct) / 100
+    ch_profit = ch["rev"] * ch_margin - ch["spend"]
+
+    cc1, cc2, cc3, cc4 = st.columns(4)
+    cc1.metric("Revenue", f0(ch["rev"]))
+    cc2.metric("Spend", f0(ch["spend"]) if ch["spend"] else "£0")
+    cc3.metric("ROAS", f"{ch_roas:.2f}x" if ch["spend"] else "∞")
+    cc4.metric("Profit after ads", f"{'+'if ch_profit>=0 else '−'}{f0(abs(ch_profit))}" if ch["spend"] else f"+{f0(ch['rev']*ch_margin)}")
+
+    cc1, cc2 = st.columns(2)
+    with cc1:
+        st.markdown(f"""
+        | Metric | Value |
+        |--------|-------|
+        | Orders | {ch['orders']:,} |
+        | New customers | {ch['newCust']:,} |
+        | AOV | {f1(ch_aov)} |
+        | CTR | {ch['ctr']}% |
+        | CVR | {ch['cvr']}% |
+        | CAC | {f1(ch_cac) if ch_cac else 'N/A (free)'} |
+        | Share of revenue | {ch['rev']/D['grossRevenue']*100:.1f}% |
+        """)
+    with cc2:
+        fig = go.Figure(go.Pie(
+            labels=["This channel", "Rest"],
+            values=[ch["rev"], D["grossRevenue"] - ch["rev"]],
+            marker=dict(colors=[ch["colour"], LINE]), hole=.65,
+            textinfo="percent", textfont=dict(size=12),
+        ))
+        fig.update_layout(title=f"{ch['name']}'s share of total revenue", showlegend=False)
+        st.plotly_chart(styled_plotly(fig, 220), use_container_width=True)
 
     st.markdown("#### Health at a glance")
     mini_cards([
@@ -594,14 +664,37 @@ elif page == "↯ Where we're leaking":
     st.markdown("#### Ranked by what it's costing you")
     for i, l in enumerate(leaks):
         lc = NEG if l["type"] == "bleed" else AMBER
-        tag_txt = "Cash bleed" if l["type"] == "bleed" else "Left on table"
-        tag_cls = "tag-neg" if l["type"] == "bleed" else "tag-warn"
-        st.markdown(f"""<div class="leak-card" style="border-left: 3px solid {lc}">
-            <div class="rk">{i+1}</div><div>
-            <div class="nm">{l["name"]} <span class="tag {tag_cls}">{tag_txt}</span></div>
-            <div class="cause">{l["cause"]}</div><div class="fix">→ {l["fix"]}</div></div>
-            <div style="text-align:right"><div class="amt" style="color:{lc}">{f0(l["amount"])}</div><div class="per">per month</div></div>
-        </div>""", unsafe_allow_html=True)
+        tag_txt = "🔴 Cash bleed" if l["type"] == "bleed" else "🟡 Left on table"
+        with st.expander(f"**#{i+1}** {l['name']} — **{f0(l['amount'])}/mo** {tag_txt}", expanded=False):
+            st.markdown(f"**What's happening:** {l['cause']}")
+            st.markdown(f"**Fix:** {l['fix']}")
+            st.markdown(f"**Monthly impact:** {f0(l['amount'])}")
+            pct_of_profit = l['amount'] / netProfit * 100 if netProfit else 0
+            st.progress(min(pct_of_profit / 100, 1.0), text=f"{pct_of_profit:.0f}% of current net profit")
+            if "ad spend" in l["name"].lower() or "wasted" in l["name"].lower():
+                st.markdown("**Products losing money on ads:**")
+                wdf = pd.DataFrame([{"Product": p["name"], "Revenue": f0(p["rev"]), "Spend": f0(p["spend"]), "ROAS": f"{p['roas']}x", "Margin": f"{p['margin']}%", "Net loss": f"−{f0(p['spend'] - p['rev'] * p['margin']/100)}"} for p in D["wasted"]])
+                st.dataframe(wdf, hide_index=True, use_container_width=True)
+            elif "tiktok" in l["name"].lower():
+                st.markdown("**TikTok vs other channels:**")
+                comp = [c for c in D["channels"] if c["spend"] > 0]
+                cdf = pd.DataFrame([{"Channel": c["name"], "Spend": f0(c["spend"]), "Revenue": f0(c["rev"]), "ROAS": f"{c['rev']/c['spend']:.2f}x", "CVR": f"{c['cvr']}%"} for c in comp])
+                st.dataframe(cdf, hide_index=True, use_container_width=True)
+            elif "stockout" in l["name"].lower():
+                st.markdown("**Best-sellers at risk of stockout:**")
+                risky = [i for i in D["inv"] if i["days"] < 20 and i["status"] == "win"]
+                if risky:
+                    rdf = pd.DataFrame([{"SKU": r["sku"], "Units left": r["units"], "Days cover": f"{r['days']}d", "Sell-through": f"{r['sellthru']}%"} for r in risky])
+                    st.dataframe(rdf, hide_index=True, use_container_width=True)
+            elif "fulfilment" in l["name"].lower():
+                st.markdown("**Cost per order breakdown:**")
+                cpo_items = [("Outbound shipping", D["shippingOut"]/D["orders"]), ("Pick & pack", D["pickPackLabour"]/D["orders"]), ("Packaging", D["packaging"]/D["orders"]), ("Payment fees", D["paymentFees"]/D["orders"])]
+                fdf = pd.DataFrame([{"Component": c[0], "Per order": f1(c[1])} for c in cpo_items])
+                st.dataframe(fdf, hide_index=True, use_container_width=True)
+            elif "mis-send" in l["name"].lower():
+                st.markdown("**All return reasons:**")
+                rdf = pd.DataFrame([{"Reason": r["reason"], "Orders": r["orders"], "Cost": f0(r["cost"])} for r in D["returns"]])
+                st.dataframe(rdf, hide_index=True, use_container_width=True)
 
     st.markdown("#### Leak ranking")
     fig = go.Figure(go.Bar(
@@ -1035,16 +1128,28 @@ elif page == "↻ Retention":
     with c1:
         st.subheader("Email flows vs campaigns")
         emailTotal = sum(e["rev"] for e in D["email"])
-        df = pd.DataFrame([{
-            "Source": e["name"], "Type": e["type"].title(),
-            "Revenue": f0(e["rev"]), "Share": f"{e['rev']/emailTotal*100:.0f}%"
-        } for e in D["email"]])
-        st.dataframe(df, hide_index=True, use_container_width=True)
+        email_details = {
+            "Welcome flow": "Triggered when a new subscriber signs up. First impression — sets the tone and drives first purchase.",
+            "Abandoned checkout": "Sent when a customer adds to cart but doesn't complete. Recovers ~10-15% of abandoned carts.",
+            "Browse abandon": "Triggered after browsing without adding to cart. Gentle nudge with personalized product recommendations.",
+            "Post-purchase": "Sent after delivery. Builds loyalty, drives reviews, and suggests complementary products.",
+            "Win-back": "Targets lapsed customers (60-90 days inactive). Re-engages with special offers or new arrivals.",
+            "Campaigns (broadcasts)": "Scheduled email blasts — new launches, promotions, seasonal events. Drives bulk revenue.",
+        }
+        for e in D["email"]:
+            share = e["rev"] / emailTotal * 100
+            with st.expander(f"**{e['name']}** — {f0(e['rev'])} ({share:.0f}% of email revenue)", expanded=False):
+                st.metric("Revenue", f0(e["rev"]))
+                st.markdown(f"**Type:** {e['type'].title()}")
+                st.markdown(f"**What it does:** {email_details.get(e['name'], '')}")
+                st.progress(share / 100, text=f"{share:.0f}% of email revenue")
     with c2:
         st.subheader("Organic & direct revenue")
         fig = go.Figure(go.Bar(x=["Jan","Feb","Mar","Apr","May","Jun"], y=D["organicTrend"],
-            marker_color="rgba(138,148,163,.7)"))
+            marker_color="rgba(138,148,163,.7)", text=[f"£{v/1000:.1f}k" for v in D["organicTrend"]], textposition="outside"))
         st.plotly_chart(styled_plotly(fig, 280), use_container_width=True)
+        growth = (D["organicTrend"][-1] - D["organicTrend"][0]) / D["organicTrend"][0] * 100
+        st.info(f"Organic revenue grew {growth:.0f}% over 6 months — from {f0(D['organicTrend'][0])} to {f0(D['organicTrend'][-1])}.")
 
 elif page == "☺ Customers":
     st.title("Customers")
@@ -1094,43 +1199,123 @@ elif page == "☺ Customers":
     st.plotly_chart(styled_plotly(fig, 250), use_container_width=True)
 
     st.markdown("#### Your three core customers")
-    cols = st.columns(3)
-    for col, p in zip(cols, C["personas"]):
-        col.markdown(f"""<div class="card" style="background:#1C232C">
-            <h3 style="color:{GOLD};font-family:Space Grotesk">{p['name']}</h3>
-            <div style="font-size:12px;color:{MUTED};margin-bottom:4px">{p['share']}</div>
-            <div style="font-size:12px;color:{MUTED};margin-bottom:10px"><b style="color:#E6E9EE">Who:</b> {p['who']}</div>
-            <div style="font-size:12.5px;line-height:1.55;margin-bottom:12px;color:#E6E9EE">{p['why']}</div>
-            <div class="plan-line" style="border:0;padding:6px 0"><span style="color:{FAINT};font-size:11px">Best reached on</span><b style="color:{STEEL};font-size:12px">{p['channel']}</b></div>
-            <div class="plan-line" style="border:0;padding:6px 0"><span style="color:{FAINT};font-size:11px">Typical AOV</span><b style="color:{GOLD};font-size:13px">{p['aov']}</b></div>
-        </div>""", unsafe_allow_html=True)
+    for p in C["personas"]:
+        with st.expander(f"**{p['name']}** — {p['share']} · AOV {p['aov']}", expanded=False):
+            c1, c2 = st.columns([2, 1])
+            with c1:
+                st.markdown(f"**Who they are:** {p['who']}")
+                st.markdown(f"**Why they buy:** {p['why']}")
+                st.markdown(f"""
+                | Attribute | Detail |
+                |-----------|--------|
+                | Share of customers | {p['share']} |
+                | Best channels | {p['channel']} |
+                | Typical AOV | {p['aov']} |
+                """)
+            with c2:
+                channels = p["channel"].split(" · ")
+                ch_data = [next((c for c in D["channels"] if c["name"] == ch), None) for ch in channels]
+                ch_data = [c for c in ch_data if c]
+                if ch_data:
+                    fig = go.Figure(go.Bar(
+                        x=[c["name"] for c in ch_data],
+                        y=[c["rev"] for c in ch_data],
+                        marker_color=[c["colour"] for c in ch_data],
+                        text=[f0(c["rev"]) for c in ch_data], textposition="outside"))
+                    fig.update_layout(showlegend=False, title="Channel revenue")
+                    st.plotly_chart(styled_plotly(fig, 200), use_container_width=True)
+            if "Self-Expressor" in p["name"]:
+                st.info("**Growth strategy:** Keep newness flowing. Launch monthly drops, use Instagram Reels and TikTok UGC. Reward repeat purchases with early access.")
+            elif "Gift-Giver" in p["name"]:
+                st.info("**Growth strategy:** Make gifting frictionless. Add gift wrapping, gift cards, and easy returns. Target spikes around Valentine's, Father's Day, and Christmas with Google Shopping.")
+            elif "Collector" in p["name"]:
+                st.info("**Growth strategy:** Build exclusivity. Limited editions, VIP early access, and personalized email. Highest LTV segment — protect at all costs.")
 
 elif page == "◈ Products & Launches":
     st.title("Products & Launches")
-    c1, c2 = st.columns(2)
-    with c1:
+
+    prod_tab1, prod_tab2, prod_tab3, prod_tab4 = st.tabs(["🏆 Winners", "💸 Wasted spend", "📊 Margins", "🚀 Launches"])
+
+    with prod_tab1:
         st.subheader("Winning products on ads")
-        df = pd.DataFrame([{"Product": p["name"], "Revenue": f0(p["rev"]), "Spend": f0(p["spend"]),
-            "ROAS": f"{p['rev']/p['spend']:.1f}x", "Margin": f"{p['margin']}%"} for p in D["winners"]])
-        st.dataframe(df, hide_index=True, use_container_width=True)
-    with c2:
-        st.subheader("Wasted ad spend")
-        wasteTotal = sum(p["spend"] - p["rev"] for p in D["wasted"])
-        df = pd.DataFrame([{"Product": p["name"], "Revenue": f0(p["rev"]), "Spend": f0(p["spend"]),
-            "ROAS": f"{p['roas']}x", "Loss": f"−{f0(p['spend']-p['rev'])}"} for p in D["wasted"]])
-        st.dataframe(df, hide_index=True, use_container_width=True)
-        st.markdown(f'<div class="note">Pausing these recovers <b style="color:{NEG}">{f0(wasteTotal)}</b>/mo of wasted spend.</div>', unsafe_allow_html=True)
+        for p in D["winners"]:
+            profit = p["rev"] * p["margin"] / 100 - p["spend"]
+            roas = p["rev"] / p["spend"]
+            with st.expander(f"**{p['name']}** — {f0(p['rev'])} revenue · {roas:.1f}x ROAS", expanded=False):
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("Revenue", f0(p["rev"]))
+                m2.metric("Ad spend", f0(p["spend"]))
+                m3.metric("ROAS", f"{roas:.1f}x")
+                m4.metric("Profit after ads", f"+{f0(profit)}")
+                st.markdown(f"""
+                | Metric | Value |
+                |--------|-------|
+                | Units sold | {p['units']:,} |
+                | Product margin | {p['margin']}% |
+                | Revenue per unit | {f1(p['rev']/p['units'])} |
+                | Ad cost per unit | {f1(p['spend']/p['units'])} |
+                | Profit per unit | {f1(profit/p['units'])} |
+                """)
+                st.success(f"This product generates {f0(profit)} net profit from ads. Consider scaling spend by 20% and monitoring ROAS.")
 
-    st.subheader("Margin by product")
-    fig = go.Figure(go.Bar(y=[p["name"] for p in D["prodMargin"]], x=[p["m"] for p in D["prodMargin"]], orientation="h",
-        marker_color=[POS if p["m"] >= 55 else (AMBER if p["m"] >= 45 else NEG) for p in D["prodMargin"]]))
-    st.plotly_chart(styled_plotly(fig, 300), use_container_width=True)
+    with prod_tab2:
+        st.subheader("Wasted ad spend — products losing money")
+        wasteTotal = sum(p["spend"] - p["rev"] * p["margin"] / 100 for p in D["wasted"])
+        st.error(f"Total wasted: {f0(wasteTotal)}/mo — pausing these drops straight to net profit.")
+        for p in D["wasted"]:
+            loss = p["spend"] - p["rev"] * p["margin"] / 100
+            with st.expander(f"**{p['name']}** — ROAS {p['roas']}x · losing ~{f0(loss)}/mo", expanded=False):
+                m1, m2, m3 = st.columns(3)
+                m1.metric("Revenue", f0(p["rev"]))
+                m2.metric("Ad spend", f0(p["spend"]))
+                m3.metric("ROAS", f"{p['roas']}x", delta=f"{p['roas']-1.63:.2f}x vs break-even", delta_color="inverse")
+                st.markdown(f"""
+                | Metric | Value |
+                |--------|-------|
+                | Product margin | {p['margin']}% |
+                | Gross profit | {f0(p['rev'] * p['margin'] / 100)} |
+                | Ad spend | {f0(p['spend'])} |
+                | **Net loss** | **−{f0(loss)}** |
+                | Break-even revenue needed | {f0(p['spend'] / (p['margin']/100))} |
+                """)
+                st.warning("**Recommended action:** Pause ads immediately. Test organic promotion or bundle with a winner.")
 
-    st.subheader("Launch tracker")
-    df = pd.DataFrame([{"Launch": l["name"], "Date": l["date"], "Revenue": f0(l["rev"]),
-        "Sell-through": f"{l['sellthru']}%", "Margin": f"{l['margin']}%",
-        "Grade": {"win": "Winner", "ok": "Solid", "watch": "At risk"}[l["status"]]} for l in D["launches"]])
-    st.dataframe(df, hide_index=True, use_container_width=True)
+    with prod_tab3:
+        st.subheader("Margin by product")
+        fig = go.Figure(go.Bar(y=[p["name"] for p in D["prodMargin"]], x=[p["m"] for p in D["prodMargin"]], orientation="h",
+            marker_color=[POS if p["m"] >= 55 else (AMBER if p["m"] >= 45 else NEG) for p in D["prodMargin"]],
+            text=[f"{p['m']}%" for p in D["prodMargin"]], textposition="outside"))
+        st.plotly_chart(styled_plotly(fig, 300), use_container_width=True)
+        avg_margin = sum(p["m"] for p in D["prodMargin"]) / len(D["prodMargin"])
+        below = [p for p in D["prodMargin"] if p["m"] < 50]
+        st.info(f"Average margin: {avg_margin:.0f}%. {len(below)} product(s) below 50% — consider price increases or cost renegotiation.")
+
+    with prod_tab4:
+        st.subheader("Launch tracker")
+        for l in D["launches"]:
+            status_icon = {"win": "🟢", "ok": "🔵", "watch": "🟡"}[l["status"]]
+            grade = {"win": "Winner", "ok": "Solid", "watch": "At risk"}[l["status"]]
+            with st.expander(f"{status_icon} **{l['name']}** — {l['date']} · {f0(l['rev'])} · {grade}", expanded=False):
+                m1, m2, m3 = st.columns(3)
+                m1.metric("Revenue", f0(l["rev"]))
+                m2.metric("Sell-through", f"{l['sellthru']}%")
+                m3.metric("Margin", f"{l['margin']}%")
+                st.markdown(f"""
+                | Metric | Value |
+                |--------|-------|
+                | Launch date | {l['date']} |
+                | Revenue to date | {f0(l['rev'])} |
+                | Sell-through rate | {l['sellthru']}% |
+                | Product margin | {l['margin']}% |
+                | Gross profit | {f0(l['rev'] * l['margin'] / 100)} |
+                | Grade | {grade} |
+                """)
+                if l["status"] == "win":
+                    st.success("Strong launch — consider reordering and scaling ad spend.")
+                elif l["status"] == "ok":
+                    st.info("Performing steady — monitor sell-through over next 2 weeks.")
+                else:
+                    st.warning("Below expectations — review pricing, creative, and targeting. Set a 14-day review deadline.")
 
 elif page == "▦ Inventory":
     st.title("Inventory")
@@ -1149,15 +1334,55 @@ elif page == "▦ Inventory":
         st.plotly_chart(styled_plotly(fig, 280), use_container_width=True)
     with c2:
         st.subheader("SKU-level inventory")
-        df = pd.DataFrame([{"SKU": i["sku"], "Units": i["units"], "Value": f0(i["value"]),
-            "Sell-through": f"{i['sellthru']}%", "Days cover": f"{i['days']}d",
-            "Status": {"win": "Winner", "ok": "Healthy", "watch": "Slow", "dead": "Dead"}[i["status"]]} for i in D["inv"]])
-        st.dataframe(df, hide_index=True, use_container_width=True)
+        status_labels = {"win": "Winner", "ok": "Healthy", "watch": "Slow", "dead": "Dead"}
+        status_icons = {"win": "🟢", "ok": "🔵", "watch": "🟡", "dead": "🔴"}
+        for inv_item in D["inv"]:
+            icon = status_icons[inv_item["status"]]
+            label = status_labels[inv_item["status"]]
+            unit_val = inv_item["value"] / inv_item["units"]
+            with st.expander(f"{icon} **{inv_item['sku']}** — {inv_item['units']} units · {inv_item['days']}d cover · {label}", expanded=False):
+                m1, m2, m3 = st.columns(3)
+                m1.metric("Units on hand", f"{inv_item['units']}")
+                m2.metric("Stock value", f0(inv_item["value"]))
+                m3.metric("Days of cover", f"{inv_item['days']}d")
+                st.markdown(f"""
+                | Metric | Value |
+                |--------|-------|
+                | Sell-through rate | {inv_item['sellthru']}% |
+                | Unit cost | {f1(unit_val)} |
+                | Daily sell rate | ~{inv_item['units']/max(inv_item['days'],1):.0f} units |
+                | Reorder point (14d cover) | {round(inv_item['units']/max(inv_item['days'],1)*14)} units |
+                """)
+                if inv_item["status"] == "win":
+                    st.success(f"Only {inv_item['days']}d of cover left — reorder now to avoid stockout.")
+                elif inv_item["status"] == "dead":
+                    st.error(f"Slow mover at {inv_item['sellthru']}% sell-through. Consider markdown or bundling.")
 
     st.subheader("Dead-stock liquidation plan")
-    df = pd.DataFrame([{"SKU": d["sku"], "Units": d["units"], "Frozen cash": f0(d["value"]),
-        "Age": f"{d['age']}d", "Plan": d["plan"]} for d in D["dead"]])
-    st.dataframe(df, hide_index=True, use_container_width=True)
+    st.error(f"Total frozen capital: {f0(D['deadStockValue'])} across {len(D['dead'])} SKUs")
+    for d in D["dead"]:
+        urgency = "🔴" if d["age"] > 120 else ("🟡" if d["age"] > 60 else "🟢")
+        with st.expander(f"{urgency} **{d['sku']}** — {f0(d['value'])} frozen · {d['age']}d old", expanded=False):
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Units stuck", f"{d['units']}")
+            m2.metric("Cash frozen", f0(d["value"]))
+            m3.metric("Days since last sale", f"{d['age']}d")
+            unit_cost = d["value"] / d["units"]
+            st.markdown(f"""
+            | Metric | Value |
+            |--------|-------|
+            | Unit cost | {f1(unit_cost)} |
+            | Units remaining | {d['units']} |
+            | Total frozen value | {f0(d['value'])} |
+            | Age (days) | {d['age']}d |
+            | Recovery at 40% markdown | ~{f0(d['value'] * 0.6)} |
+            | Recovery at 60% markdown | ~{f0(d['value'] * 0.4)} |
+            """)
+            st.info(f"**Liquidation plan:** {d['plan']}")
+            if d["age"] > 120:
+                st.error("Urgent: over 120 days old. Markdown aggressively or bundle with best-sellers.")
+            elif d["age"] > 60:
+                st.warning("Monitor closely. If no improvement in 14 days, begin clearance.")
 
 elif page == "☖ Staff & Targets":
     st.title("Staff & Targets")
@@ -1173,21 +1398,62 @@ elif page == "☖ Staff & Targets":
     ])
 
     st.subheader("Staff scorecard")
-    data = []
-    for s in D["staff"]:
-        if s["type"] == "rev":
+    staff_tab1, staff_tab2 = st.tabs(["💰 Revenue team", "📦 Fulfilment team"])
+    with staff_tab1:
+        for s in [s for s in D["staff"] if s["type"] == "rev"]:
             grossFromThem = s["driven"] * (grossMarginPct / 100)
             impact = grossFromThem - s["cost"]
             hit = s["driven"] / s["target"] * 100
-            data.append({"Name": s["name"], "Role": s["role"], "Driven/output": f0(s["driven"]),
-                "Loaded cost": f0(s["cost"]), "Target": f"{f0(s['target'])} ({hit:.0f}%)",
-                "Profit impact": f"{'+'if impact>0 else '−'}{f0(abs(impact))}", "Verdict": "Generating" if s["driven"] >= s["target"] else "Below target"})
-        else:
+            verdict_icon = "🟢" if s["driven"] >= s["target"] else "🟡"
+            with st.expander(f"{verdict_icon} **{s['name']}** — {s['role']} · {f0(s['driven'])} driven · {hit:.0f}% of target", expanded=False):
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("Revenue driven", f0(s["driven"]))
+                m2.metric("Target", f0(s["target"]))
+                m3.metric("Target hit", f"{hit:.0f}%")
+                m4.metric("Profit impact", f"{'+'if impact>0 else '−'}{f0(abs(impact))}")
+                st.progress(min(hit / 100, 1.0), text=f"{hit:.0f}% of {f0(s['target'])} target")
+                st.markdown(f"""
+                | Metric | Value |
+                |--------|-------|
+                | Loaded cost (salary + benefits) | {f0(s['cost'])} |
+                | Revenue attributed | {f0(s['driven'])} |
+                | Gross profit generated | {f0(grossFromThem)} |
+                | ROI on salary | {grossFromThem/s['cost']:.1f}x |
+                | Net impact (profit − cost) | {'+'if impact>0 else '−'}{f0(abs(impact))} |
+                """)
+                if s["driven"] >= s["target"]:
+                    st.success(f"Hitting target. Generating {f0(impact)} net impact. Consider performance bonus.")
+                else:
+                    st.warning(f"Below target by {f0(s['target'] - s['driven'])}. Review pipeline and support needed.")
+    with staff_tab2:
+        for s in [s for s in D["staff"] if s["type"] == "ops"]:
             cpo = s["cost"] / s["packed"]
-            data.append({"Name": s["name"], "Role": s["role"], "Driven/output": f"{s['packed']} packed",
-                "Loaded cost": f0(s["cost"]), "Target": f"err {s['errors']}%",
-                "Profit impact": f"{f1(cpo)}/order", "Verdict": "Strong" if s["errors"] < 1.5 else ("Watch" if s["errors"] < 3 else "Costing money")})
-    st.dataframe(pd.DataFrame(data), hide_index=True, use_container_width=True)
+            verdict_icon = "🟢" if s["errors"] < 1.5 else ("🟡" if s["errors"] < 3 else "🔴")
+            missends = round(s["packed"] * s["errors"] / 100)
+            missend_cost = missends * 29
+            with st.expander(f"{verdict_icon} **{s['name']}** — {s['role']} · {s['packed']} packed · {s['errors']}% errors", expanded=False):
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("Orders packed", f"{s['packed']}")
+                m2.metric("Error rate", f"{s['errors']}%")
+                m3.metric("Cost/order", f1(cpo))
+                m4.metric("Est. mis-send cost", f"−{f0(missend_cost)}")
+                st.markdown(f"""
+                | Metric | Value |
+                |--------|-------|
+                | Monthly salary | {f0(s['cost'])} |
+                | Orders packed | {s['packed']} |
+                | Cost per order | {f1(cpo)} |
+                | Error rate | {s['errors']}% |
+                | Estimated mis-sends | {missends} |
+                | Mis-send cost (~£29 each) | {f0(missend_cost)} |
+                | True cost (salary + errors) | {f0(s['cost'] + missend_cost)} |
+                """)
+                if s["errors"] < 1.5:
+                    st.success("Excellent accuracy. Consider as mentor for other packers.")
+                elif s["errors"] < 3:
+                    st.info("Acceptable but room to improve. Monitor weekly.")
+                else:
+                    st.error(f"High error rate costing ~{f0(missend_cost)}/mo in re-ships. Needs scan-to-pack and retraining.")
 
     c1, c2 = st.columns(2)
     with c1:
@@ -1237,14 +1503,34 @@ elif page == "⚙ Pick · Pack · Dispatch":
     c1, c2 = st.columns(2)
     with c1:
         st.subheader("Dispatch SLA")
-        df = pd.DataFrame([{"Window": s["window"], "Target": f"{s['target']}%", "Actual": f"{s['actual']}%",
-            "Status": "Met" if s["actual"] >= s["target"] else f"{s['target']-s['actual']}pp short"} for s in D["dispatchSLA"]])
-        st.dataframe(df, hide_index=True, use_container_width=True)
+        for s in D["dispatchSLA"]:
+            met = s["actual"] >= s["target"]
+            icon = "🟢" if met else "🔴"
+            gap = s["actual"] - s["target"]
+            with st.expander(f"{icon} **{s['window']}** — {s['actual']}% vs {s['target']}% target", expanded=False):
+                st.metric("Actual performance", f"{s['actual']}%", delta=f"{gap:+d}pp vs target")
+                st.progress(s["actual"] / 100, text=f"{s['actual']}% dispatched on time")
+                if not met:
+                    st.warning(f"Missing target by {abs(gap)}pp. Review bottlenecks in this dispatch window.")
+                else:
+                    st.success("Meeting target. Maintain current performance.")
     with c2:
         st.subheader("Returns & the cost of getting it wrong")
-        df = pd.DataFrame([{"Reason": r["reason"], "Orders": r["orders"], "Cost": f0(r["cost"]),
-            "% of returns": f"{r['orders']/totReturns*100:.0f}%"} for r in D["returns"]])
-        st.dataframe(df, hide_index=True, use_container_width=True)
+        for r in D["returns"]:
+            share = r["orders"] / totReturns * 100
+            preventable = "mis-pick" in r["reason"].lower() or "damaged" in r["reason"].lower()
+            icon = "🔴" if preventable else "🟡"
+            with st.expander(f"{icon} **{r['reason']}** — {r['orders']} orders · {f0(r['cost'])} cost", expanded=False):
+                m1, m2 = st.columns(2)
+                m1.metric("Orders affected", f"{r['orders']}")
+                m2.metric("Total cost", f0(r["cost"]))
+                st.markdown(f"**Share of all returns:** {share:.0f}%")
+                cost_per = r["cost"] / r["orders"]
+                st.markdown(f"**Cost per return:** {f1(cost_per)}")
+                if preventable:
+                    st.error("This is a preventable return. Fix the root cause to eliminate these costs entirely.")
+                else:
+                    st.info("Customer-driven return. Improve product descriptions, sizing guides, or photos to reduce.")
 
 elif page == "◰ Marketplaces":
     st.title("Marketplaces")
@@ -1272,17 +1558,29 @@ elif page == "◰ Marketplaces":
     ])
 
     st.markdown("#### Profit per marketplace")
-    cols = st.columns(3)
-    for col, c in zip(cols, cardData):
-        col.markdown(f"""<div class="card">
-            <h3 style="color:#E6E9EE;font-family:Space Grotesk">{c['name']}</h3>
-            <div style="font-size:12px;color:{MUTED}">{c['feePct']}% commission · {c['units']} orders</div>
-            <div style="margin-top:10px">
-            <div class="plan-line"><span>Revenue</span><b style="color:{POS}">{f0(c['rev'])}</b></div>
-            <div class="plan-line"><span>Platform fees</span><b style="color:{NEG}">−{f0(c['feesPaid'])}</b></div>
-            <div class="plan-line"><span>Contribution</span><b style="color:{POS}">{f0(c['profit'])}</b></div>
-            <div class="plan-line"><span>Top seller</span><b style="color:{GOLD}">{c['topProduct']}</b></div>
-            </div></div>""", unsafe_allow_html=True)
+    for c in cardData:
+        margin_icon = "🟢" if c["margin"] > 30 else ("🟡" if c["margin"] > 15 else "🔴")
+        cogs_mp = c["rev"] * MP["cogsRate"]
+        ful_mp = c["units"] * fulfil
+        with st.expander(f"{margin_icon} **{c['name']}** — {f0(c['rev'])} revenue · {c['margin']:.0f}% margin · {c['units']} orders", expanded=False):
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Revenue", f0(c["rev"]))
+            m2.metric("Platform fees", f"−{f0(c['feesPaid'])}")
+            m3.metric("Contribution", f0(c["profit"]))
+            m4.metric("Net margin", f"{c['margin']:.1f}%")
+            st.markdown(f"""
+            | Line item | Amount | % of revenue |
+            |-----------|--------|-------------|
+            | Revenue | {f0(c['rev'])} | 100% |
+            | Product cost (COGS) | −{f0(cogs_mp)} | {cogs_mp/c['rev']*100:.1f}% |
+            | Fulfilment | −{f0(ful_mp)} | {ful_mp/c['rev']*100:.1f}% |
+            | Platform fees ({c['feePct']}%) | −{f0(c['feesPaid'])} | {c['feesPaid']/c['rev']*100:.1f}% |
+            | **Contribution** | **{f0(c['profit'])}** | **{c['margin']:.1f}%** |
+            """)
+            st.markdown(f"**Top seller:** {c['topProduct']}")
+            rev_per_order = c["rev"] / c["units"]
+            profit_per_order = c["profit"] / c["units"]
+            st.markdown(f"**Revenue per order:** {f1(rev_per_order)} · **Profit per order:** {f1(profit_per_order)}")
 
     st.markdown("#### Product margins by marketplace")
     def net_unit(price, cost, ch):
@@ -1355,14 +1653,35 @@ elif page == "◷ Quarterly trends":
     st.markdown("#### Quarter by quarter")
     for q in Q["quarters"]:
         tot = q["dtcRev"] + q["retailRev"]; roas = q["dtcRev"] / q["adSpend"]
-        st.markdown(f"""<div class="card"><h3>{q['q']} <span style="color:{FAINT};font-weight:400;font-size:12px">{q['months']}</span>
-            {'<span class="tag tag-gold">Peak</span>' if q['q']=='Q4' else ''}</h3>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px">
-            <div class="mini-card"><div class="l">Total revenue</div><div class="v">{f0(tot)}</div><div class="s">DTC {f0(q['dtcRev'])} · Retail {f0(q['retailRev'])}</div></div>
-            <div class="mini-card"><div class="l">Ad spend</div><div class="v">{f0(q['adSpend'])}</div><div class="s">ROAS {roas:.2f}x · {q['newCust']:,} new custs</div></div>
-            </div>
-            <div class="plan-line" style="margin-top:10px"><span>Hero product — {q['topReason']}</span><b style="color:{GOLD}">{q['topProduct']}</b></div>
-        </div>""", unsafe_allow_html=True)
+        peak_label = " ⭐ Peak" if q['q'] == 'Q4' else ""
+        with st.expander(f"**{q['q']}** ({q['months']}) — Total: {f0(tot)} · ROAS: {roas:.2f}x{peak_label}", expanded=False):
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Total revenue", f0(tot))
+            m2.metric("Ad spend", f0(q["adSpend"]))
+            m3.metric("ROAS", f"{roas:.2f}x")
+            m4.metric("New customers", f"{q['newCust']:,}")
+            st.markdown("---")
+            d1, d2 = st.columns(2)
+            with d1:
+                st.markdown(f"""
+                | Metric | Value |
+                |--------|-------|
+                | DTC revenue | {f0(q['dtcRev'])} |
+                | Retail revenue | {f0(q['retailRev'])} |
+                | DTC share | {q['dtcRev']/tot*100:.0f}% |
+                | Retail share | {q['retailRev']/tot*100:.0f}% |
+                | Cost per new customer | {f1(q['adSpend']/q['newCust'])} |
+                | Revenue per new customer | {f1(q['dtcRev']/q['newCust'])} |
+                """)
+            with d2:
+                st.markdown(f"**Hero product:** {q['topProduct']}")
+                st.markdown(f"**Reason:** {q['topReason']}")
+                st.markdown(f"**Hero revenue:** {f0(q['topRev'])}")
+                st.markdown(f"**Hero as % of DTC:** {q['topRev']/q['dtcRev']*100:.1f}%")
+                fig = go.Figure(go.Pie(labels=["Hero product", "Other products"], values=[q["topRev"], q["dtcRev"]-q["topRev"]],
+                    marker=dict(colors=[GOLD, LINE]), hole=.6, textinfo="percent"))
+                fig.update_layout(showlegend=False, title="Hero product share")
+                st.plotly_chart(styled_plotly(fig, 180), use_container_width=True)
 
     st.subheader("Ad spend & efficiency by quarter")
     fig = go.Figure()
@@ -1406,17 +1725,53 @@ elif page == "⎈ Ad spend playbook":
     fig.update_layout(barmode="group")
     st.plotly_chart(styled_plotly(fig, 320), use_container_width=True)
 
-    c1, c2 = st.columns(2)
-    with c1:
+    ad_tab1, ad_tab2, ad_tab3 = st.tabs(["📈 Scale months", "📉 Cut months", "📋 Full calendar"])
+    with ad_tab1:
         st.subheader("↑ Scale up here")
-        df = pd.DataFrame([{"Month": m["m"], "Why": m["note"], "ROAS": f"{m['roas']:.1f}x",
-            "Profit on spend": f"+{f0(profitOf(m))}"} for m in scales])
-        st.dataframe(df, hide_index=True, use_container_width=True)
-    with c2:
+        for m in scales:
+            profit = profitOf(m)
+            with st.expander(f"**{m['m']}** — {m['roas']:.1f}x ROAS · +{f0(profit)} profit · {m['note']}", expanded=False):
+                m1, m2, m3 = st.columns(3)
+                m1.metric("ROAS", f"{m['roas']:.1f}x")
+                m2.metric("Spend (£k)", f"£{m['spend']}k")
+                m3.metric("Profit from spend", f"+{f0(profit)}")
+                recommended = round(m["spend"] * 1.2)
+                st.markdown(f"""
+                | Metric | Value |
+                |--------|-------|
+                | Last year spend | £{m['spend']}k |
+                | Recommended spend | £{recommended}k (+20%) |
+                | Expected revenue at {m['roas']:.1f}x | {f0(recommended * 1000 * m['roas'])} |
+                | Context | {m['note']} |
+                """)
+                st.success(f"This is a scaling window. Budget should be {recommended}k+ to capitalize on {m['note'].lower()}.")
+    with ad_tab2:
         st.subheader("↓ Pull spend back here")
-        df = pd.DataFrame([{"Month": m["m"], "Why": m["note"], "ROAS": f"{m['roas']:.1f}x",
-            "Lost last year": f"−{f0(abs(profitOf(m)))}"} for m in cuts])
-        st.dataframe(df, hide_index=True, use_container_width=True)
+        for m in cuts:
+            loss = abs(profitOf(m))
+            with st.expander(f"**{m['m']}** — {m['roas']:.1f}x ROAS · −{f0(loss)} lost · {m['note']}", expanded=False):
+                m1, m2, m3 = st.columns(3)
+                m1.metric("ROAS", f"{m['roas']:.1f}x", delta=f"{m['roas']-be:.2f}x vs break-even", delta_color="normal")
+                m2.metric("Spend (£k)", f"£{m['spend']}k")
+                m3.metric("Money lost", f"−{f0(loss)}")
+                recommended = round(m["spend"] * 0.45)
+                st.markdown(f"""
+                | Metric | Value |
+                |--------|-------|
+                | Last year spend | £{m['spend']}k |
+                | Recommended spend | £{recommended}k (−55%) |
+                | Context | {m['note']} |
+                | Savings vs last year | {f0((m['spend'] - recommended) * 1000)} |
+                """)
+                st.warning(f"Pull back significantly. Shift budget to email and retention during {m['note'].lower()}.")
+    with ad_tab3:
+        st.subheader("Full 12-month calendar")
+        action_icon = {"scale": "📈", "hold": "⏸️", "cut": "📉"}
+        for m in M:
+            profit = profitOf(m)
+            icon = action_icon[m["action"]]
+            color = "green" if m["action"] == "scale" else ("orange" if m["action"] == "hold" else "red")
+            st.markdown(f"{icon} **{m['m']}** — £{m['spend']}k spend · {m['roas']:.1f}x ROAS · {m['note']} · :{color}[{m['action'].upper()}]")
 
 elif page == "★ Amazon-grade KPIs":
     st.title("Amazon-grade KPIs")
@@ -1471,11 +1826,43 @@ elif page == "★ Amazon-grade KPIs":
     st.plotly_chart(styled_plotly(fig, 280), use_container_width=True)
 
     st.subheader("Operational health scorecard")
-    pillFor = {"good": "pill-win", "warn": "pill-watch", "bad": "pill-dead", "neutral": "pill-ok"}
     labFor = {"good": "On target", "warn": "Watch", "bad": "Fix now", "neutral": "Monitor"}
-    cols = st.columns(2)
-    for i, g in enumerate(K["scorecard"]):
-        with cols[i % 2]:
-            st.markdown(f"**{g['group']}**")
-            df = pd.DataFrame([{"Metric": r["m"], "Current": r["v"], "Target": r["t"], "Status": labFor[r["s"]]} for r in g["rows"]])
-            st.dataframe(df, hide_index=True, use_container_width=True)
+    iconFor = {"good": "🟢", "warn": "🟡", "bad": "🔴", "neutral": "🔵"}
+    kpi_explanations = {
+        "Marketing efficiency ratio (MER)": "Total revenue divided by total marketing spend. Shows how efficiently your entire marketing engine converts spend into revenue.",
+        "Contribution margin (CM2)": "What's left after product costs, fulfilment, AND marketing. The money available to cover fixed costs and profit.",
+        "CAC payback": "How many orders it takes to recoup the cost of acquiring a customer. Under 2 orders means fast payback.",
+        "Cash conversion cycle": "Days between paying for inventory and collecting cash from customers. Lower is better — cash stays liquid.",
+        "Month-on-month growth": "Revenue growth rate vs the previous month. Sustained 10%+ indicates healthy scaling.",
+        "Repeat-purchase rate": "Percentage of customers who buy more than once. Higher repeat rate = lower reliance on paid acquisition.",
+        "Net Promoter Score": "Would customers recommend you? 50+ is excellent. Drives organic growth through word-of-mouth.",
+        "Average review rating": "Product quality signal. Below 4.5 causes conversion rate drops, especially on marketplaces.",
+        "Contacts per order (CS load)": "How many customer service tickets per order. High ratio = product/shipping quality issues.",
+        "New vs returning revenue": "Balance between acquisition and retention revenue. Heavy new-customer dependence is risky.",
+        "In-stock / availability rate": "Percentage of SKUs available to buy. Stockouts = lost revenue and damaged ad efficiency.",
+        "Lost sales from stockouts": "Revenue you couldn't capture because products were out of stock.",
+        "GMROI (margin per £ of stock)": "Gross margin return on inventory investment. How hard your stock is working for you.",
+        "Inventory turns (annualised)": "How many times you sell through your entire inventory per year. Higher = less cash tied up.",
+        "Demand forecast accuracy": "How well you predict what will sell. Poor forecasts cause stockouts AND dead stock.",
+        "Perfect-order rate": "Orders delivered on time, complete, undamaged, with correct invoice. The gold standard of fulfilment.",
+        "Order defect rate (ODR)": "Percentage of orders with a defect (return, complaint, chargeback). Amazon suspends at 1%.",
+        "On-time dispatch": "Orders shipped within the promised window. Late dispatch = poor reviews and repeat-purchase drops.",
+        "Units per hour (packing)": "Warehouse productivity metric. Below 50 UPH means process inefficiency or training gaps.",
+        "Fulfilment cost / order": "Total cost to pick, pack, and ship one order. Keep below £10.50 for healthy margins.",
+        "Return rate": "Percentage of orders returned. Above 4% signals product quality or listing accuracy issues.",
+        "Damage rate": "Orders damaged in transit. Above 0.5% = packaging or courier problems.",
+    }
+    for g in K["scorecard"]:
+        with st.expander(f"**{g['group']}** — {sum(1 for r in g['rows'] if r['s']=='good')}/{len(g['rows'])} on target", expanded=False):
+            for r in g["rows"]:
+                icon = iconFor[r["s"]]
+                status = labFor[r["s"]]
+                st.markdown(f"{icon} **{r['m']}**: {r['v']} (target: {r['t']}) — *{status}*")
+                explanation = kpi_explanations.get(r["m"], "")
+                if explanation:
+                    st.caption(explanation)
+                if r["s"] == "bad":
+                    st.error(f"Below target. Immediate action required to bring {r['m']} to {r['t']}.")
+                elif r["s"] == "warn":
+                    st.warning(f"Approaching risk zone. Monitor weekly and plan corrective action.")
+                st.markdown("---")
